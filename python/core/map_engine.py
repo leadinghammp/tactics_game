@@ -10,7 +10,7 @@ if TYPE_CHECKING:
 @dataclass
 class TerrainDef:
     name:    str
-    tile_id: int    # column in FullTileset.png (0-based, 32px tiles)
+    tile_id: int    # tile ID in 9×5 tileset (0-44, 120×120px tiles)
     passable_foot:   bool = True
     passable_mount:  bool = True
     move_cost_foot:  int  = 1
@@ -25,32 +25,21 @@ class TerrainDef:
 
 
 TERRAIN: dict[str, TerrainDef] = {
-    # id = col + row*20  (16px tiles, 20 cols wide)
-    # (0,0)  tan/dirt  → plain ground
-    # (0,2)  green     → grass/forest base
-    # (0,1)  grey      → road/stone path
-    # (0,4)  grey-tan  → mountain/rubble
-    # (0,10) white-grey → wall/snow
-    # (0,13) blue      → river/water
-    # (0,3)  light grey → fort/castle floor
-    # (4,6)  tan spot  → village
-    # (0,5)  warm tan  → castle/ruin
-    # (10,3) blue-grey → throne
-    # (2,0)  tan       → sand (same family as plain, distinct tile)
+    # 9×5 tileset (136×129px tiles)
     "plain":    TerrainDef("Plain",    0,   True, True,  1, 1, 0,  0,  0),
-    "road":     TerrainDef("Road",     20,  True, True,  1, 1, 0,  5,  0),
-    "forest":   TerrainDef("Forest",   40,  True, False, 2, 3, 1, 20,  0),
-    "mountain": TerrainDef("Mountain", 80,  True, False, 3, 4, 2, 10,  0),
-    "wall":     TerrainDef("Wall",     200, False,False,99,99, 3,  0,  0, blocks_los=True),
-    "river":    TerrainDef("River",    260, False,False, 3, 3, 0,  0,  0),
-    "fort":     TerrainDef("Fort",     60,  True, True,  1, 1, 2, 10, 20),
-    "village":  TerrainDef("Village",  124, True, True,  1, 1, 1,  5,  0),
-    "castle":   TerrainDef("Castle",   100, True, True,  1, 1, 3,  0, 10),
-    "throne":   TerrainDef("Throne",   213, True, True,  1, 1, 4,  0, 20, is_capture=True),
+    "road":     TerrainDef("Road",     1,   True, True,  1, 1, 0,  5,  0),
     "sand":     TerrainDef("Sand",     2,   True, True,  2, 2, 0,  5,  0),
-    "chest":    TerrainDef("Chest",    124, True, True,  1, 1, 0,  0,  0, is_chest=True),
-    "door":     TerrainDef("Door",     200, False,False,99,99, 0,  0,  0, is_door=True),
-    "gate":     TerrainDef("Gate",     100, True, True,  1, 1, 3,  0, 20, is_capture=True),
+    "forest":   TerrainDef("Forest",   9,   True, False, 2, 3, 1, 20,  0),
+    "mountain": TerrainDef("Mountain", 10,  True, False, 3, 4, 2, 10,  0),
+    "river":    TerrainDef("River",    18,  False,False, 3, 3, 0,  0,  0),
+    "wall":     TerrainDef("Wall",     27, False,False,99,99, 3,  0,  0, blocks_los=True),
+    "fort":     TerrainDef("Fort",     28,  True, True,  1, 1, 2, 10, 20),
+    "castle":   TerrainDef("Castle",   29, True, True,  1, 1, 3,  0, 10),
+    "throne":   TerrainDef("Throne",   36, True, True,  1, 1, 4,  0, 20, is_capture=True),
+    "village":  TerrainDef("Village",  37, True, True,  1, 1, 1,  5,  0),
+    "chest":    TerrainDef("Chest",    38, True, True,  1, 1, 0,  0,  0, is_chest=True),
+    "door":     TerrainDef("Door",     39, False,False,99,99, 0,  0,  0, is_door=True),
+    "gate":     TerrainDef("Gate",     40, True, True,  1, 1, 3,  0, 20, is_capture=True),
 }
 
 TILE_COLORS: dict[str, tuple] = {

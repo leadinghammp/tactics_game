@@ -29,9 +29,9 @@ except ImportError:
 
 # ── Module path ──────────────────────────────────────────────────────────
 HERE = Path(__file__).resolve().parent
-CHRONICLES = HERE.parent / "dungeon_crawler/python"
+CHRONICLES = HERE.parent / "tactics_game/python"
 if not CHRONICLES.exists():
-    CHRONICLES = HERE / "dungeon_crawler/python"
+    CHRONICLES = HERE / "tactics_game/python"
 if str(CHRONICLES) not in sys.path:
     sys.path.insert(0, str(CHRONICLES))
 
@@ -600,7 +600,7 @@ class TacticsGame:
                 if ts:
                     self.screen.blit(ts, (sx, sy))
                 else:
-                    col = TILE_COLORS.get(ter_key, (100, 100, 100))
+                    col = getattr(ter, "color", (100, 100, 100))
                     pygame.draw.rect(self.screen, col, (sx, sy, T, T))
                 pygame.draw.rect(self.screen, (0, 0, 0, 40), (sx, sy, T, T), 1)
                 if ter.is_capture:

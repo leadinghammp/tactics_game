@@ -1,11 +1,3 @@
-"""
-ui_combat_animator.py — Floating combat sub-window.
-
-State sequence:
-    INTRO → CLASH → RECOIL [→ COUNTER → RECOIL2] [→ DBL → RECOIL3] → OUTRO
-
-draw(screen, font_sm) drives update() internally; set done=True signals caller.
-"""
 from __future__ import annotations
 import math, random
 import pygame
@@ -31,7 +23,7 @@ class CombatAnimator:
         self._miss_flash=self._crit_flash=0
         self._atk_x=self._dfd_x=self._atk_x0=self._dfd_x0=0.0; self._positions_set=False
         self._atk_shake=self._dfd_shake=0
-        self._atk_anim=self._dfd_anim="idle_s"; self._atk_flip=False; self._dfd_flip=True
+        self._atk_anim=self._dfd_anim="walk"; self._atk_flip=False; self._dfd_flip=True
         self._anim_tick=self._sprite_frame=0; self._damage_numbers=[]
 
     def _advance(self):
@@ -47,7 +39,7 @@ class CombatAnimator:
     def update(self):
         if self.done: return
         self._t+=1; self._anim_tick+=1
-        if self._anim_tick>=60//self.ANIM_FPS: self._anim_tick=0; self._sprite_frame^=1
+        if self._anim_tick>=60//self.ANIM_FPS: self._anim_tick=0; self._sprite_frame=(self._sprite_frame+1)%4
         for attr,real in (("atk_hp_disp",self.atk_hp),("dfd_hp_disp",self.dfd_hp)):
             v=getattr(self,attr)
             if v>real: setattr(self,attr,max(real,v-1.2))
@@ -57,28 +49,28 @@ class CombatAnimator:
         sp=self.SPRITE_SCALE*64; S=self._state
         if S=="INTRO":
             self._alpha=min(255,self._alpha+12)
-            self._atk_anim=self._dfd_anim="idle_s"; self._atk_flip=False; self._dfd_flip=True
+            self._atk_anim=self._dfd_anim="walk"; self._atk_flip=False; self._dfd_flip=True
             self._atk_x+=(self._atk_x0-self._atk_x)*0.18
             self._dfd_x+=(self._dfd_x0-self._dfd_x)*0.18
             if abs(self._atk_x-self._atk_x0)<2 and abs(self._dfd_x-self._dfd_x0)<2 and self._t>20:
                 self._atk_x=self._atk_x0; self._dfd_x=self._dfd_x0; self._advance()
         elif S in ("RECOIL","RECOIL2","RECOIL3"):
-            self._atk_anim=self._dfd_anim="idle_s"; self._atk_flip=False; self._dfd_flip=True
+            self._atk_anim=self._dfd_anim="walk"; self._atk_flip=False; self._dfd_flip=True
             self._atk_x+=(self._atk_x0-self._atk_x)*0.22; self._dfd_x+=(self._dfd_x0-self._dfd_x)*0.22
             if self._t>18: self._advance()
         elif S in ("CLASH","DBL"):
-            self._atk_anim="walk_e"; self._atk_flip=False; self._dfd_anim="idle_s"; self._dfd_flip=True
+            self._atk_anim="walk"; self._atk_flip=False; self._dfd_anim="walk"; self._dfd_flip=True
             self._atk_x=min(self._dfd_x-sp,self._atk_x+self.SLIDE_SPEED*2)
             if self._atk_x>=self._dfd_x-sp:
                 hi=0 if S=="CLASH" else (2 if self.fc.get("can_counter") and self.fc.get("counter") else 1)
                 self._apply_hit(hi)
-                self._atk_anim="idle_e"; self._dfd_anim="idle_w"; self._dfd_flip=False; self._dfd_shake=18; self._advance()
+                self._atk_anim="walk"; self._dfd_anim="walk"; self._dfd_flip=True; self._dfd_shake=18; self._advance()
         elif S=="COUNTER":
-            self._dfd_anim="walk_e"; self._dfd_flip=True; self._atk_anim="idle_s"; self._atk_flip=False
+            self._dfd_anim="walk"; self._dfd_flip=True; self._atk_anim="walk"; self._atk_flip=False
             self._dfd_x=max(self._atk_x+sp,self._dfd_x-self.SLIDE_SPEED*2)
             if self._dfd_x<=self._atk_x+sp:
                 self._apply_hit(1 if self.fc.get("can_counter") and self.fc.get("counter") else 0)
-                self._dfd_anim="idle_e"; self._dfd_flip=True; self._atk_anim="idle_w"; self._atk_shake=18; self._advance()
+                self._dfd_anim="walk"; self._dfd_flip=True; self._atk_anim="walk"; self._atk_shake=18; self._advance()
         elif S=="OUTRO":
             self._alpha=max(0,self._alpha-10)
             if self._alpha==0: self.done=True
@@ -96,13 +88,11 @@ class CombatAnimator:
         self.log.append(f"Critical! -{actual}" if is_crit else f"-{actual} HP")
         SFX and SFX.play("crit" if is_crit else "hit", 0.9 if is_crit else 0.8)
         if is_crit: self._crit_flash=45
-        # Update internal display HP only — never touch unit.hp or unit.is_alive.
-        # resolve_combat() in _on_done is the sole authority for real unit state.
         pfx="dfd" if is_dfd else "atk"
         setattr(self,f"{pfx}_hp_ghost",getattr(self,f"{pfx}_hp_disp"))
         new_hp=max(0.,getattr(self,f"{pfx}_hp")-actual)
         setattr(self,f"{pfx}_hp",new_hp)
-        if new_hp<=0: SFX and SFX.play("defeat",0.85)  # play death sound visually
+        if new_hp<=0: SFX and SFX.play("defeat",0.85)
         col=(255,230,0) if is_crit else (255,80,80)
         self._damage_numbers.append([x_base+sp//2-18,14,f"-{actual}!"if is_crit else f"-{actual}",col,55])
 
@@ -141,8 +131,8 @@ class CombatAnimator:
         from core.unit_classes import CLASSES
         sp=self.SPRITE_SCALE*64; y_sp=10
         sx=x+(int(math.sin(shake*1.8)*5) if shake>0 else 0)
-        cls_obj=CLASSES.get(unit.unit_class); key=cls_obj.sprite_key if cls_obj else "SwordFighter_ShortHair"
-        fs=self.assets.get_sprite_frame(key,team,anim,self._sprite_frame)
+        cls_obj=CLASSES.get(unit.unit_class); key=cls_obj.sprite_key if cls_obj else "Swordsman"
+        fs=self.assets.get_sprite_frame(key,anim,self._sprite_frame)
         if fs:
             sc=pygame.transform.scale(fs,(sp,sp))
             if flip: sc=pygame.transform.flip(sc,True,False)

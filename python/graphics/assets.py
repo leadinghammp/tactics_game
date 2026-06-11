@@ -1,200 +1,311 @@
 """
-Asset registry. Loads sprites directly from the Fantasy Battle Pack zip.
+Asset registry. Loads sprites and tiles from PNG files.
 
-Sprite sheet layout (verified):
-  - All sheets: 256x448, 64x64 frames, cols 0-1 active per row, 7 rows
-  - Tileset: 320x320, 32x32 tiles, 10 cols x 10 rows
-  - SelectionCursor: 64x32, 2 frames of 32x32
-  - RangerFinderTile: 224x16, tile at col 0
-  - GridOverlay: 16x16 (scaled to tile size on use)
-
-Classes WITHOUT palette index: AxeKnight, LanceKnight (filename: Class_Color.png)
-All other classes WITH palette index:           (filename: Class_Color1.png)
+File layouts:
+  - human_sprites.png: Character unit animations
+    - Left half: WALK animations (4 frames per character)
+    - Right half: ATTACK animations (3 frames per character)
+    - 8 character rows: Swordsman, Shieldman, Lancer, Spearman, Archer, Crossbowman, Cavalry, Paladin
+    - Size-16 characters (rows 0-5): 16x16 pixels
+    - Size-32 characters (rows 6-7): 32x32 pixels
+  
+  - sample_tiles.png: Game tiles and terrain
+    - 1254x1254 PNG with 64x64 tiles (19 cols × 19 rows = 361 tiles)
+    - Organized by terrain type: grass, dirt, water, trees, buildings, walls, decorations, flags, plants
 """
-import zipfile, io
 from pathlib import Path
 from typing import Optional
 
 import pygame
 
-ZIP_SEARCH = [
-    "C:\\Users\\leadi\\OneDrive\\Documents\\Python Scripts\\dungeon_crawler\\python\\graphics\\Fantasy_Battle_Pack_06-07-25.zip",
-    "Fantasy_Battle_Pack_06-07-25.zip",
-    "assets/Fantasy_Battle_Pack_06-07-25.zip",
+# Search paths relative to this file's location
+_ASSET_DIR = Path(__file__).resolve().parent
+
+SPRITE_SHEET_PATHS = [
+    _ASSET_DIR / "human_sprites.png",
+    _ASSET_DIR.parent / "human_sprites.png",
+    Path("human_sprites.png"),
+    Path("assets/human_sprites.png"),
+    Path("graphics/human_sprites.png"),
 ]
 
-# sprite_key -> folder/basename inside "Fantasy Battle Pack/Sprite Sheets/"
+TILE_SHEET_PATHS = [
+    _ASSET_DIR / "sample_tiles.png",
+    _ASSET_DIR.parent / "sample_tiles.png",
+    Path("sample_tiles.png"),
+    Path("assets/sample_tiles.png"),
+    Path("graphics/sample_tiles.png"),
+]
+
+# ── Unit Sprite Configuration ──────────────────────────────────────
+
+# sprite_key -> (row_index, frame_size)
 SPRITE_KEY_MAP = {
-    "SwordFighter_LongHair":   "SwordFighter/SwordFighter_LongHair",
-    "SwordFighter_ShortHair":  "SwordFighter/SwordFighter_ShortHair",
-    "SpearFighter_LongHair":   "SpearFighter/SpearFighter_LongHair",
-    "SpearFighter_ShortHair":  "SpearFighter/SpearFighter_ShortHair",
-    "AxeFighter_LongHair":     "AxeFighter/AxeFighter_LongHair",
-    "AxeFighter_ShortHair":    "AxeFighter/AxeFighter_ShortHair",
-    "Archer":                  "Archer/Archer",
-    "Thief":                   "Thief/Thief",
-    "Wizard":                  "Wizard/Wizard",
-    "SwordCavalier_LongHair":  "SwordCavalier/SwordCavalier_LongHair",
-    "SwordCavalier_ShortHair": "SwordCavalier/SwordCavalier_ShortHair",
-    "LanceCavalier_LongHair":  "LanceCavalier/LanceCavalier_LongHair",
-    "LanceCavalier_ShortHair": "LanceCavalier/LanceCavalier_ShortHair",
-    "MountedArcher":           "MountedArcher/MountedArcher",
-    "AxeKnight":               "AxeKnight/AxeKnight",
-    "LanceKnight":             "LanceKnight/LanceKnight",
+    "Swordsman":     (0, 16),
+    "Shieldman":     (1, 16),
+    "Lancer":        (2, 16),
+    "Spearman":      (3, 16),
+    "Archer":        (4, 16),
+    "Crossbowman":   (5, 16),
+    "Cavalry":       (6, 32),
+    "Paladin":       (7, 32),
 }
 
-# Only these two classes ship without a palette index suffix
-NO_PALETTE_INDEX = {"AxeKnight", "LanceKnight"}
-
-TEAM_VARIANT   = {"player": "Blue",  "enemy": "Red",   "ally": "Green"}
-PALETTE_INDEX  = {"player": "1",     "enemy": "1",     "ally": "1"}
-
-# Row index -> animation name
-ANIM_ROWS = {
-    0: "idle_s", 1: "idle_n", 2: "idle_e", 3: "idle_w",
-    4: "walk_s", 5: "walk_n", 6: "walk_e",
+# Animation names and their frame counts
+ANIM_FRAMES = {
+    "walk":   4,
+    "attack": 3,
 }
-FRAME_W, FRAME_H = 32,32   # sheets are 256x448: 4 cols x 7 rows of 64x64
-SHEET_COLS       = 4        # total columns in sheet (cols 0-1 active, 2-3 unused/mirror)
-ACTIVE_FRAMES    = 2        # cols 0 and 1 per row contain the two animation frames
+
+# ── Tile Configuration ─────────────────────────────────────────────
+
+# Tile layout constants (120×120 tiles in a 9×5 grid)
+# Display size scales to ~60px via TILE_BASE in ui_constants.py
+TILE_WIDTH = 120
+TILE_HEIGHT = 120
+TILE_COLS = 9
+TILE_ROWS = 5
+TOTAL_TILES = TILE_COLS * TILE_ROWS
+
+# Tile ID ranges and descriptions
+TILE_ID_RANGES = {
+    "row0":  (0, 8),
+    "row1":  (9, 17),
+    "row2":  (18, 26),
+    "row3":  (27, 35),
+    "row4":  (36, 44),
+}
+
+# Named tiles
+NAMED_TILES = {f"tile_{i}": i for i in range(45)}
 
 
 class AssetRegistry:
-    def __init__(self, zip_path: Optional[str] = None):
-        self._zip: Optional[zipfile.ZipFile] = None
+    """
+    Centralized asset manager for sprites and tiles.
+    
+    Loads character sprites from human_sprites.png and terrain tiles from sample_tiles.png.
+    Supports caching for improved performance.
+    """
+    
+    def __init__(self, sprite_path: Optional[str] = None, tile_path: Optional[str] = None):
+        self._sprite_sheet: Optional[pygame.Surface] = None
+        self._tile_sheet: Optional[pygame.Surface] = None
         self._cache: dict[str, pygame.Surface] = {}
-        self._init_zip(zip_path)
+        
+        self._init_sprite_sheet(sprite_path)
+        self._init_tile_sheet(tile_path)
 
-    def _init_zip(self, override: Optional[str]):
-        candidates = ([override] if override else []) + ZIP_SEARCH
+    def _init_sprite_sheet(self, override: Optional[str]):
+        """Load the sprite sheet from disk."""
+        candidates = ([override] if override else []) + SPRITE_SHEET_PATHS
         for path in candidates:
             if Path(path).exists():
                 try:
-                    self._zip = zipfile.ZipFile(path)
+                    self._sprite_sheet = pygame.image.load(path).convert_alpha()
+                    print(f"[AssetRegistry] Loaded sprite sheet: {path} ({self._sprite_sheet.get_width()}x{self._sprite_sheet.get_height()})")
                     return
-                except zipfile.BadZipFile:
+                except (pygame.error, Exception) as e:
+                    print(f"[AssetRegistry] Failed to load sprite sheet {path}: {e}")
                     continue
-        print("[AssetRegistry] WARNING: zip not found — using colour fallbacks.")
+        print("[AssetRegistry] WARNING: sprite sheet not found — sprite requests will return None.")
 
-    def _read(self, zip_path: str) -> Optional[pygame.Surface]:
-        try:
-            data = self._zip.read(zip_path)
-            return pygame.image.load(io.BytesIO(data)).convert_alpha()
-        except (KeyError, pygame.error, Exception):
+    def _init_tile_sheet(self, override: Optional[str]):
+        """Load the tile sheet from disk."""
+        candidates = ([override] if override else []) + TILE_SHEET_PATHS
+        for path in candidates:
+            if Path(path).exists():
+                try:
+                    self._tile_sheet = pygame.image.load(path).convert_alpha()
+                    print(f"[AssetRegistry] Loaded tile sheet: {path} ({self._tile_sheet.get_width()}x{self._tile_sheet.get_height()})")
+                    return
+                except (pygame.error, Exception) as e:
+                    print(f"[AssetRegistry] Failed to load tile sheet {path}: {e}")
+                    continue
+        print("[AssetRegistry] WARNING: tile sheet not found — tile requests will return None.")
+
+    # ── Unit Sprites ───────────────────────────────────────────────
+
+    def get_sprite_frame(self, sprite_key: str, anim: str = "walk", frame: int = 0) -> Optional[pygame.Surface]:
+        """
+        Extract a single animation frame from the sprite sheet.
+        
+        Args:
+            sprite_key: Character class name (e.g., "Swordsman", "Cavalry")
+            anim: Animation name ("walk" or "attack")
+            frame: Frame index within the animation (0-indexed)
+        
+        Returns:
+            Pygame Surface with the sprite frame, or None if not found
+        """
+        if self._sprite_sheet is None:
             return None
 
-    # ── Sprites ───────────────────────────────────────────────────────
-
-    def get_sprite_frame(self, sprite_key: str, team: str,
-                          anim: str = "idle_s", frame: int = 0
-                          ) -> Optional[pygame.Surface]:
-        cache_key = f"sp_{sprite_key}_{team}_{anim}_{frame}"
+        cache_key = f"sp_{sprite_key}_{anim}_{frame}"
         if cache_key in self._cache:
             return self._cache[cache_key]
 
-        folder = SPRITE_KEY_MAP.get(sprite_key)
-        if not folder:
-            return None
-
-        variant  = TEAM_VARIANT.get(team, "Blue")
-        # Determine class base name (last segment of folder path)
-        cls_name = folder.split("/")[0]   # e.g. "AxeKnight"
-        if cls_name in NO_PALETTE_INDEX:
-            fname = f"Fantasy Battle Pack/Sprite Sheets/{folder}_{variant}.png"
-        else:
-            idx   = PALETTE_INDEX.get(team, "1")
-            fname = f"Fantasy Battle Pack/Sprite Sheets/{folder}_{variant}{idx}.png"
-
-        sheet = self._read(fname)
-        if sheet is None:
+        # Look up sprite metadata
+        sprite_info = SPRITE_KEY_MAP.get(sprite_key)
+        if not sprite_info:
             self._cache[cache_key] = None
             return None
 
-        row = next((r for r, n in ANIM_ROWS.items() if n == anim), 0)
-        col = min(frame, ACTIVE_FRAMES - 1)
-        surf = sheet.subsurface(pygame.Rect(col * FRAME_W, row * FRAME_H, FRAME_W, FRAME_H))
-        self._cache[cache_key] = surf
-        return surf
+        row_idx, frame_size = sprite_info
+        max_frames = ANIM_FRAMES.get(anim, 0)
+        if max_frames == 0 or frame >= max_frames:
+            self._cache[cache_key] = None
+            return None
 
-    # ── Tiles ─────────────────────────────────────────────────────────
+        # Clamp frame index
+        frame = min(frame, max_frames - 1)
 
-    def get_tile(self, tile_id: int, size: int = 32) -> Optional[pygame.Surface]:
-        cache_key = f"tile_{tile_id}_{size}"
+        # Calculate the bounding box for this frame
+        # Based on visual inspection:
+        # - Walk section: left side, 4 frames per character
+        # - Attack section: right side, 3 frames per character
+        # - Each frame is in a grid cell with padding
+        
+        cell_width = 64   # Width of each frame cell (frame + borders/padding)
+        cell_height = 64  # Height of each frame cell (frame + borders/padding)
+        
+        # Row position (vertical)
+        row_y = row_idx * cell_height
+        
+        # Column position depends on animation
+        if anim == "walk":
+            col_x = frame * cell_width
+        elif anim == "attack":
+            # Attack frames are on the right side, after walk frames
+            # Assuming 4 walk frames take up ~256 pixels
+            col_x = (4 * cell_width) + (frame * cell_width)
+        else:
+            self._cache[cache_key] = None
+            return None
+
+        # Center the frame within the cell (account for padding)
+        padding = (cell_width - frame_size) // 2
+        x = col_x + padding
+        y = row_y + padding
+
+        try:
+            surf = self._sprite_sheet.subsurface(pygame.Rect(x, y, frame_size, frame_size))
+            self._cache[cache_key] = surf
+            return surf
+        except (ValueError, pygame.error) as e:
+            # subsurface failed (likely out of bounds)
+            self._cache[cache_key] = None
+            return None
+
+    # ── Tiles ──────────────────────────────────────────────────────
+
+    def get_tile(self, tile_id: int, scale: int = 1) -> Optional[pygame.Surface]:
+        """
+        Extract a tile from the tile sheet.
+        
+        Args:
+            tile_id: Tile index (0-44 for 9×5 grid)
+            scale: Scale factor for the returned tile (1 = 120×120, 2 = 240×240, etc.)
+        
+        Returns:
+            Pygame Surface with the tile, or None if not found
+        """
+        if self._tile_sheet is None:
+            return None
+
+        cache_key = f"tile_{tile_id}_{scale}"
         if cache_key in self._cache:
             return self._cache[cache_key]
 
-        sheet = self._read("Fantasy Battle Pack/Tiles/FullTileset.png")
-        if sheet is None:
+        # Clamp tile_id to valid range
+        tile_id = max(0, min(tile_id, TOTAL_TILES - 1))
+
+        # Calculate grid position
+        col = tile_id % TILE_COLS
+        row = tile_id // TILE_COLS
+        
+        # Calculate pixel position
+        x = col * TILE_WIDTH
+        y = row * TILE_HEIGHT
+
+        try:
+            surf = self._tile_sheet.subsurface(pygame.Rect(x, y, TILE_WIDTH, TILE_HEIGHT))
+            
+            # Apply scaling if requested
+            if scale != 1:
+                new_size = TILE_WIDTH * scale
+                surf = pygame.transform.scale(surf, (new_size, new_size))
+            
+            self._cache[cache_key] = surf
+            return surf
+        except (ValueError, pygame.error):
+            self._cache[cache_key] = None
             return None
 
-        cols  = sheet.get_width()  // 16   # 20
-        rows  = sheet.get_height() // 16   # 20
-        total = cols * rows
-        tile_id = max(0, min(tile_id, total - 1))
-        tx = (tile_id % cols) * 16
-        ty = (tile_id // cols) * 16
-        surf = sheet.subsurface(pygame.Rect(tx, ty, 16, 16))
-        if size != 16:
-            surf = pygame.transform.scale(surf, (size, size))
-        self._cache[cache_key] = surf
-        return surf
+    def get_tile_by_name(self, tile_name: str, scale: int = 1) -> Optional[pygame.Surface]:
+        """
+        Extract a tile by its name.
+        
+        Args:
+            tile_name: Name of the tile (e.g., "grass_plain", "house_red_1")
+            scale: Scale factor for the returned tile
+        
+        Returns:
+            Pygame Surface with the tile, or None if not found
+        """
+        tile_id = NAMED_TILES.get(tile_name)
+        if tile_id is None:
+            return None
+        return self.get_tile(tile_id, scale)
 
-    # ── UI elements ───────────────────────────────────────────────────
+    # ── UI Elements ────────────────────────────────────────────────
 
     def get_cursor(self, frame: int = 0) -> Optional[pygame.Surface]:
-        cache_key = f"cursor_{frame % 2}"
-        if cache_key in self._cache:
-            return self._cache[cache_key]
-        sheet = self._read("Fantasy Battle Pack/UI Elements/SelectionCursor.png")
-        if sheet is None:
-            return None
-        surf = sheet.subsurface(pygame.Rect((frame % 2) * 32, 0, 32, 32))
-        self._cache[cache_key] = surf
-        return surf
+        return None
 
     def get_range_tile(self, kind: str = "blue_half") -> Optional[pygame.Surface]:
-        _map = {
-            "blue_half":  "RangerFinderTile_Blue_50%Opacity.png",
-            "blue_solid": "RangerFinderTile_Blue_Solid.png",
-            "red_half":   "RangerFinderTile_Red_50%Opacity.png",
-            "red_solid":  "RangerFinderTile_Red_Solid.png",
-            "green_half": "RangerFinderTile_Green_50%Opacity.png",
-            "green_solid":"RangerFinderTile_Green_Solid.png",
-        }
-        fname = _map.get(kind)
-        if not fname:
-            return None
-        cache_key = f"rt_{kind}"
-        if cache_key in self._cache:
-            return self._cache[cache_key]
-        sheet = self._read(f"Fantasy Battle Pack/UI Elements/{fname}")
-        if sheet is None:
-            return None
-        # Sheet is 224x16; each tile is 16x16. Take the first one.
-        surf = sheet.subsurface(pygame.Rect(0, 0, 16, 16))
-        self._cache[cache_key] = surf
-        return surf
+        return None
 
     def get_grid_overlay(self, tile_size: int = 32) -> Optional[pygame.Surface]:
-        cache_key = f"grid_{tile_size}"
-        if cache_key in self._cache:
-            return self._cache[cache_key]
-        sheet = self._read("Fantasy Battle Pack/UI Elements/GridOverlay.png")
-        if sheet is None:
-            return None
-        # GridOverlay is 16x16; always scale to requested tile_size
-        surf = pygame.transform.scale(sheet, (tile_size, tile_size))
-        self._cache[cache_key] = surf
-        return surf
+        return None
 
     def get_effect(self, name: str = "CriticalHit", frame: int = 0) -> Optional[pygame.Surface]:
-        cache_key = f"fx_{name}_{frame}"
-        if cache_key in self._cache:
-            return self._cache[cache_key]
-        sheet = self._read(f"Fantasy Battle Pack/Effects/{name}.png")
-        if sheet is None:
-            return None
-        fw = sheet.get_width() // 4
-        surf = sheet.subsurface(pygame.Rect(min(frame, 3) * fw, 0, fw, sheet.get_height()))
-        self._cache[cache_key] = surf
-        return surf
+        return None
+
+    # ── Utility ────────────────────────────────────────────────────
+
+    @staticmethod
+    def list_sprites() -> list[str]:
+        """Return list of available sprite keys."""
+        return list(SPRITE_KEY_MAP.keys())
+
+    @staticmethod
+    def list_animations() -> list[str]:
+        """Return list of available animation names."""
+        return list(ANIM_FRAMES.keys())
+
+    @staticmethod
+    def get_frame_count(anim: str) -> int:
+        """Get the number of frames in an animation."""
+        return ANIM_FRAMES.get(anim, 0)
+
+    @staticmethod
+    def list_tile_names() -> list[str]:
+        """Return list of all named tile keys."""
+        return sorted(NAMED_TILES.keys())
+
+    @staticmethod
+    def get_tile_ranges() -> dict[str, tuple[int, int]]:
+        """Get the ID ranges for each tile category."""
+        return TILE_ID_RANGES.copy()
+
+    def clear_cache(self):
+        """Clear the sprite/tile cache to free memory."""
+        self._cache.clear()
+
+    def get_cache_stats(self) -> dict:
+        """Get statistics about the cache."""
+        return {
+            "cached_items": len(self._cache),
+            "memory_estimate_mb": len(self._cache) * 0.001,  # Rough estimate
+        }

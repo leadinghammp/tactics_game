@@ -4,7 +4,7 @@ from enum import Enum, auto
 import pygame
 
 SW, SH         = 1440, 900
-TILE_BASE      = 60
+TILE_BASE      = 120
 FPS            = 60
 MAP_OFF_X_BASE = 270
 
